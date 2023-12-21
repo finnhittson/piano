@@ -1,16 +1,28 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import tensorflow as tf
 from PIL import Image
 import numpy as np
 from multiprocessing import Pool
 import shutil
+import pickle
+import pandas as pd
+import pathlib
 
 class DataLoader():
 
-	def __init__(self, path):
-		self.unified_heights = False
+	def __init__(self, path, batch_size, val_size):
 		self.path = path
-		self.image_path = os.path.join(self.path, "images")
+		self.batch_size = batch_size
+		self.val_size = val_size
+
+		self.unified_heights = False
+		self.image_path = os.path.join(self.path, "ds", "images")
+		self.label_path = os.path.join(self.path, "ds", "numified_labels")
+		self.alph_label_path = os.path.join(self.path, "ds", "labels")
 		self.unified_images_path = os.path.join(self.path, "unified_images")
+		if not os.path.exists(self.unified_images_path):
+			self.unified_images_path = None
 
 	def get_max_image_height(self):
 		imgs = os.listdir(os.path.join(self.image_path))
@@ -38,9 +50,16 @@ class DataLoader():
 		print(f"Unified {idx + 1} image heights, {height} pixels tall.")
 		self.unified_heights = True
 
-	def get_random_image(self):
-		images = os.listdir(self.image_path)
-		return images[np.random.randint(0, len(images))]
+	def unify_image_widths(self):
+		if not os.path.exists(os.path.join(self.path, "unified_width")):
+			os.mkdir(os.path.join(self.path, "unified_width"))
+		widths = [Image.open(os.path.join(self.image_path, image)).size[0] for image in os.listdir(self.image_path)]
+		avg_width = round(np.mean(widths))
+		for idx, image in enumerate(os.listdir(self.image_path)):
+			img = Image.open(os.path.join(self.image_path, image))
+			resized_img = img.resize((avg_width, img.size[1]))
+			resized_img.save(os.path.join(self.path, "unified_width", image))
+		print(f"Reshaped {idx+1} images to ({avg_width}, 226).")
 
 	def organize_primus(self, primus_path, dst):
 		if not os.path.exists(dst):
@@ -84,8 +103,70 @@ class DataLoader():
 
 		return alphabet
 
+	def numify_labels(self):
+		if not os.path.exists(os.path.join(self.path, "ds", "numified_labels")):
+			os.mkdir(os.path.join(self.path, "ds", "numified_labels"))
+		try:
+			alphabet = open(os.path.join(self.path, "alphabet.txt")).read().split("\t")
+		except:
+			raise SystemExit(f"Could not find alphabet.txt file: {os.path.join(self.path, 'alphabet.txt')}")
+		for idx, label in enumerate(os.listdir(self.alph_label_path)):
+			opened_label = open(os.path.join(self.alph_label_path, label)).read().split("\t")
+			numerical_encoding = []
+			for note in opened_label:
+				for jdx, element in enumerate(alphabet):
+					if note == element:
+						numerical_encoding.append(jdx)
+			f = open(os.path.join(self.path, "ds", "numified_labels", label.split(".")[0] + ".txt"), "w")
+			f.write("_ " + " _ ".join(str(num) for num in numerical_encoding) + " _")
+			f.close()
+		print(f"Numerified {idx + 1} labels into text files.")
+
+	def gen_label_image_locs(self):
+		image_file = open(os.path.join(self.path, "image_addresses.txt"), "w")
+		label_file = open(os.path.join(self.path, "label_addresses.txt"), "w")
+		for idx, name in enumerate(os.listdir(self.image_path)):
+			image_file.write(os.path.join(self.image_path, name) + "\n")
+			label_file.write(os.path.join(self.label_path, name.split(".")[0] + ".txt") + "\n")
+		image_file.close()
+		label_file.close()
+		self.image_loc_path = os.path.join(self.path, "image_addresses.txt")
+		self.label_loc_path = os.path.join(self.path, "label_addresses.txt")
+		print(f"Wrote {idx + 1} image and label address locations to image_addresses.txt and label_addresses.txt files.")
+
+	def get_ds(self):
+		labels = []
+		max_label_length = 0
+		for name in os.listdir(self.label_path):
+			with open(os.path.join(self.label_path, name), "r") as fp:
+				label = fp.read().strip().split(" ")
+				if len(label) > max_label_length:
+					max_label_length = len(label)
+				labels.append(np.array(label))
+		for idx, label in enumerate(labels):
+			amt = max_label_length - len(label)
+			labels[idx] = np.pad(label, (0, amt), "constant", constant_values=("_", "_"))
+		label_ds = tf.data.Dataset.from_tensor_slices(labels)
+
+		def process_path(path):
+			return tf.image.decode_png(tf.io.read_file(path), channels=1)
+		image_ds = tf.data.Dataset.list_files(str(pathlib.Path(self.image_path + "\\*.png")))
+		image_ds = image_ds.map(process_path)
+
+		dataset = tf.data.Dataset.zip((image_ds, label_ds))
+		dataset = dataset.shuffle(buffer_size=len(dataset))
+		val_amt = round(self.val_size * len(dataset))
+		train_ds = dataset.skip(val_amt).batch(self.batch_size, drop_remainder=True)
+		val_ds = dataset.take(val_amt).batch(self.batch_size, drop_remainder=True)
+		print(f"Training dataset created - images: {self.batch_size * len(train_ds)}, batches: {len(train_ds)}")
+		print(f"Validation dataset created - images: {self.batch_size * len(val_ds)}, batches: {len(val_ds)}")
+		return train_ds, val_ds
+
+
 if __name__ == "__main__":
-	path = "C:\\Users\\hitts\\Desktop\\ds"
-	#path = "C:\\Users\\hitts\\Documents\\GitHub\\piano\\primus_ds"
-	dl = DataLoader(path)
-	dl.unify_image_heights()
+	path = "C:\\Users\\hitts\\Documents\\GitHub\\piano"
+	#path = "C:\\Users\\hitts\\Desktop"
+	batch_size = 32
+	val_size = 0.2
+	dl = DataLoader(path, batch_size, val_size)
+	train_ds, val_ds = dl.get_ds()

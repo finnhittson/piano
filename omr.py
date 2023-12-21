@@ -57,3 +57,5 @@ def get_model(alphabet_length):
 		optimizer = keras.optimizers.Adam(lr=0.001),
 		metrics = ["accuracy"]
 	)
+
+	return model
