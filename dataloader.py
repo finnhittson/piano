@@ -8,13 +8,19 @@ import shutil
 import pickle
 import pandas as pd
 import pathlib
+import matplotlib.pyplot as plt
+
+def ping():
+	print("Pong")
 
 class DataLoader():
 
-	def __init__(self, path, batch_size, val_size):
+	def __init__(self, path, batch_size:int=0, val_size:float=0.2, shuffle:bool=False, verbose:bool=False):
 		self.path = path
 		self.batch_size = batch_size
 		self.val_size = val_size
+		self.shuffle = shuffle
+		self.verbose = verbose
 
 		self.unified_heights = False
 		self.image_path = os.path.join(self.path, "ds", "images")
@@ -106,10 +112,12 @@ class DataLoader():
 	def numify_labels(self):
 		if not os.path.exists(os.path.join(self.path, "ds", "numified_labels")):
 			os.mkdir(os.path.join(self.path, "ds", "numified_labels"))
+		
 		try:
 			alphabet = open(os.path.join(self.path, "alphabet.txt")).read().split("\t")
 		except:
 			raise SystemExit(f"Could not find alphabet.txt file: {os.path.join(self.path, 'alphabet.txt')}")
+		
 		for idx, label in enumerate(os.listdir(self.alph_label_path)):
 			opened_label = open(os.path.join(self.alph_label_path, label)).read().split("\t")
 			numerical_encoding = []
@@ -117,10 +125,11 @@ class DataLoader():
 				for jdx, element in enumerate(alphabet):
 					if note == element:
 						numerical_encoding.append(jdx)
-			f = open(os.path.join(self.path, "ds", "numified_labels", label.split(".")[0] + ".txt"), "w")
-			f.write("_ " + " _ ".join(str(num) for num in numerical_encoding) + " _")
+			f = open(os.path.join(self.label_path, label.split(".")[0] + ".txt"), "w")
+			f.write("0 " + " 0 ".join(str(num) for num in numerical_encoding) + " 0")
 			f.close()
-		print(f"Numerified {idx + 1} labels into text files.")
+		if self.verbose:
+			print(f"Numerified {idx + 1} labels into text files.")
 
 	def gen_label_image_locs(self):
 		image_file = open(os.path.join(self.path, "image_addresses.txt"), "w")
@@ -145,28 +154,62 @@ class DataLoader():
 				labels.append(np.array(label))
 		for idx, label in enumerate(labels):
 			amt = max_label_length - len(label)
-			labels[idx] = np.pad(label, (0, amt), "constant", constant_values=("_", "_"))
+			labels[idx] = np.pad(label, (0, amt), "constant", constant_values=("0", "0"))
 		label_ds = tf.data.Dataset.from_tensor_slices(labels)
-
+		#label_ds = tf.data.Dataset.from_tensor_slices(os.listdir(self.label_path))
+		
 		def process_path(path):
 			return tf.image.decode_png(tf.io.read_file(path), channels=1)
-		image_ds = tf.data.Dataset.list_files(str(pathlib.Path(self.image_path + "\\*.png")))
+
+		image_ds = tf.data.Dataset.list_files(str(pathlib.Path(self.image_path + "\\*.png")), shuffle=False)
 		image_ds = image_ds.map(process_path)
 
 		dataset = tf.data.Dataset.zip((image_ds, label_ds))
-		dataset = dataset.shuffle(buffer_size=len(dataset))
+		# for x, y in dataset:
+		# 	print(str(x.numpy()).split("\\")[-1].split(".")[0])
+		# 	print(str(y.numpy())[2:].split(".")[0])
+		# 	print()
+		# print("########")
+		if self.shuffle:
+			dataset = dataset.shuffle(buffer_size=len(dataset))
 		val_amt = round(self.val_size * len(dataset))
-		train_ds = dataset.skip(val_amt).batch(self.batch_size, drop_remainder=True)
-		val_ds = dataset.take(val_amt).batch(self.batch_size, drop_remainder=True)
-		print(f"Training dataset created - images: {self.batch_size * len(train_ds)}, batches: {len(train_ds)}")
-		print(f"Validation dataset created - images: {self.batch_size * len(val_ds)}, batches: {len(val_ds)}")
+		train_ds = dataset.skip(val_amt)
+		val_ds = dataset.take(val_amt)
+		# for x, y in train_ds:
+		# 	print(str(x.numpy()).split("\\")[-1].split(".")[0])
+		# 	print(str(y.numpy())[2:].split(".")[0])
+		# 	print()
+		# raise SystemExit("Done.")
+		if self.verbose:
+			print(f"Loaded {len(train_ds) + len(val_ds)} images.")
+		if self.batch_size:
+			train_ds = train_ds.batch(self.batch_size, drop_remainder=True)
+			val_ds = val_ds.batch(self.batch_size, drop_remainder=True)
+			if self.verbose:
+				print(f"Training dataset created: {self.batch_size * len(train_ds)} images, {len(train_ds)} batches.")
+				print(f"Validation dataset created: {self.batch_size * len(val_ds)} images, {len(val_ds)} batches.")
+		elif self.verbose:
+			print(f"Training dataset created: {len(train_ds)} images.")
+			print(f"Validation dataset created: {len(val_ds)} images.")
 		return train_ds, val_ds
 
+	def decode_numerical_label(self, labels):
+		alphabet = open(os.path.join(self.path, "alphabet.txt")).read().split("\t")
+		return [alphabet[int(idx)] for idx in labels if int(idx)]
+
+	def get_alphabet(self):
+		return open(os.path.join(self.path, "alphabet.txt")).read().split("\t")
 
 if __name__ == "__main__":
 	path = "C:\\Users\\hitts\\Documents\\GitHub\\piano"
 	#path = "C:\\Users\\hitts\\Desktop"
-	batch_size = 32
+	batch_size = 0
 	val_size = 0.2
-	dl = DataLoader(path, batch_size, val_size)
+	shuffle = False
+	verbose = False
+	dl = DataLoader(path, batch_size, val_size, shuffle, verbose)
 	train_ds, val_ds = dl.get_ds()
+	image, label = next(iter(train_ds))
+	print(dl.decode_numerical_label(label.numpy()))
+	plt.imshow(image)
+	plt.show()
