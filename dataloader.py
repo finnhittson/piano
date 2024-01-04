@@ -186,8 +186,8 @@ class DataLoader():
 			train_ds = train_ds.batch(self.batch_size, drop_remainder=True)
 			val_ds = val_ds.batch(self.batch_size, drop_remainder=True)
 			if self.verbose:
-				print(f"Training dataset created: {self.batch_size * len(train_ds)} images, {len(train_ds)} batches.")
-				print(f"Validation dataset created: {self.batch_size * len(val_ds)} images, {len(val_ds)} batches.")
+				print(f"Training dataset created: {self.batch_size * len(train_ds)} images, {len(train_ds)} batches of size {self.batch_size}.")
+				print(f"Validation dataset created: {self.batch_size * len(val_ds)} images, {len(val_ds)} batches of size {self.batch_size}.")
 		elif self.verbose:
 			print(f"Training dataset created: {len(train_ds)} images.")
 			print(f"Validation dataset created: {len(val_ds)} images.")
