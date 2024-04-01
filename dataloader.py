@@ -191,7 +191,16 @@ class DataLoader():
 		elif self.verbose:
 			print(f"Training dataset created: {len(train_ds)} images.")
 			print(f"Validation dataset created: {len(val_ds)} images.")
-		return train_ds, val_ds
+		
+		x_train, y_train = list(map(list, zip(*[(x.numpy(), y.numpy()) for x, y in train_ds])))
+		x_test, y_test = list(map(list, zip(*[(x.numpy(), y.numpy()) for x, y in val_ds])))
+
+		x_train = np.array(x_train)
+		y_train = np.array(y_train).astype(int)
+		x_test = np.array(x_test)
+		x_test = np.array(x_test).astype(int)
+
+		return x_train, y_train, x_test, y_test
 
 	def decode_numerical_label(self, labels):
 		alphabet = open(os.path.join(self.path, "alphabet.txt")).read().split("\t")
